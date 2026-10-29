@@ -1,0 +1,2 @@
+# Saltos de línea LF en los datos: el MD5 del CSV es el mismo en todos los sistemas operativos
+*.csv text eol=lf

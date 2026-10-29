@@ -8,6 +8,12 @@ authors = [
 readme = "README.md"
 requires-python = ">=3.12,<3.15"
 dependencies = [
+    "prefect (==3.8.8)",
+    "mlflow (==3.17.0)",
+    "scikit-learn (==1.9.1)",
+    "pandas (==3.0.6)",
+    "numpy (==2.5.4)",
+    "pyyaml (==6.0.3)"
 ]
 
 
@@ -21,6 +27,7 @@ package-mode = false
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+
 [dependency-groups]
 dev = [
     "pytest (==9.1.1)"
