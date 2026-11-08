@@ -1,10 +1,12 @@
 # Configuración central del proyecto.
-# Todos los scripts y flows leen de aquí: no hay rutas ni hiperparámetros escritos a mano en el código.
+# Todo lo que puede cambiar vive aquí, no en el código: se ajusta la pipeline sin tocar Python.
+# La selección de variables del experimento está aparte, en configs/features.yaml.
 
 datos:
   ruta: data/car_sales_dataset.csv   # relativa a la raíz del repositorio
   num_registros: 20000               # filas del dataset sintético (15.000 a 30.000)
   semilla: 42                        # misma semilla => mismo dataset en cada ejecución
+  objetivo: precio_venta             # variable a predecir (USD)
   columnas_esperadas:
     - fecha_venta
     - marca
@@ -14,18 +16,44 @@ datos:
     - precio_lista
     - precio_venta
 
-modelo:
-  objetivo: precio_venta
-  variables_categoricas: [marca, tipo_vehiculo]
-  variables_numericas: [año_modelo, kilometraje, precio_lista]
-  tipo: random_forest                # random_forest | linear_regression
-  hiperparametros:
-    n_estimators: 200
-    max_depth: 12
-    random_state: 42
+division:
   test_size: 0.2
-  semilla_split: 42
+  semilla: 42
+
+# Modelo que entrena cada ejecución. Para probar otro, cambia `tipo` y sus hiperparámetros.
+modelo:
+  tipo: random_forest                # random_forest | gradient_boosting | linear_regression
+  hiperparametros:                   # solo se usan los del tipo elegido
+    random_forest:
+      n_estimators: 200
+      max_depth: 12
+      random_state: 42
+    gradient_boosting:
+      n_estimators: 300
+      learning_rate: 0.05
+      max_depth: 3
+      random_state: 42
+    linear_regression: {}
 
 mlflow:
-  experimento: precio-vehiculos-a1
-  nombre_run: rf-baseline
+  experimento: precio-vehiculos      # entrenamiento e inferencia comparten experimento
+  nombre_run_entrenamiento: entrenamiento
+  nombre_run_inferencia: inferencia
+
+# Reglas para que un modelo pase a ser champion.
+# Usamos R² en lugar de AUC porque el problema es de regresión: igual que el AUC, va de 0 a 1
+# y es mejor cuanto más alto.
+registro:
+  nombre_modelo: precio-vehiculos-modelo   # nombre en el Model Registry de MLflow
+  metrica: r2                              # métrica que decide quién es champion
+  umbral_minimo: 0.90                      # R² mínimo para poder ser champion
+  mejora_minima: 0.001                     # criterio adicional del grupo: debe superar al champion por al menos esto
+  mae_maximo: 1000.0                       # criterio adicional del grupo: error medio máximo aceptado (USD)
+
+inferencia:
+  tamano_lote: 100                   # vehículos que se valoran en cada ejecución diaria
+  carpeta_salida: data/predicciones  # aquí queda prediccion_<fecha>.csv (no se versiona)
+
+despliegue:
+  cron_inferencia: "0 6 * * *"       # todos los días a las 06:00
+  zona_horaria: America/Bogota

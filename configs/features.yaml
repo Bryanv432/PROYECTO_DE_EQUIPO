@@ -1,0 +1,25 @@
+# Variables del experimento.
+# Cambia `seleccion` para entrenar con otro conjunto; cada run registra en MLflow
+# el alias usado (parámetro `features`) y el número de variables (`n_features`).
+#
+#   ALL     -> todas las variables, numéricas y categóricas
+#   NUMERIC -> solo las numéricas
+#   CUSTOM  -> solo las que se listan en `custom` (nombres exactos del CSV)
+
+seleccion: CUSTOM
+
+numericas:
+  - año_modelo
+  - kilometraje
+  - precio_lista
+
+categoricas:
+  - marca
+  - tipo_vehiculo
+
+# Sin precio_lista: estimar el precio solo con las características del vehículo.
+custom:
+  - marca
+  - tipo_vehiculo
+  - año_modelo
+  - kilometraje
