@@ -36,6 +36,11 @@ PROYECTO_DE_EQUIPO/
 │   ├── train.py               # pipeline de scikit-learn y métricas
 │   └── champion.py            # regla para decidir si un modelo pasa a champion
 ├── tests/                     # pruebas con pytest
+│   ├── test_api.py            # pruebas de endpoints FastAPI (/health, /model-info, /predict)
+│   ├── test_champion.py       # pruebas de reglas de decisión de champion
+│   ├── test_datos.py          # pruebas de reproducibilidad y datos
+│   ├── test_features.py       # pruebas de alias ALL, NUMERIC y CUSTOM
+│   └── test_train.py          # pruebas del pipeline de entrenamiento
 ├── poetry.lock
 ├── pyproject.toml
 └── README.md
@@ -203,6 +208,37 @@ Invoke-RestMethod -Uri http://localhost:8000/predict -Method Post -ContentType "
 ```
 
 La API recibe todos los datos del vehículo y usa solo las variables con las que se entrenó el champion. Si el entrenamiento promueve un champion nuevo, **reinicia la API** (Ctrl + C y vuelve a lanzarla) para que lo use. No hay que cambiar código.
+
+#### `configs/features.yaml`:
+
+Archivo de configuración para definir el conjunto de variables del experimento sin alterar el código fuente. En cada ejecución (*run*) se registran automáticamente en MLflow el alias seleccionado (`features`) y la cantidad de variables utilizadas (`n_features`).
+
+```yaml
+# Variables del experimento.
+# Opciones para `seleccion`: ALL | NUMERIC | CUSTOM
+seleccion: CUSTOM
+
+numericas:
+  - año_modelo
+  - kilometraje
+  - precio_lista
+
+categoricas:
+  - marca
+  - tipo_vehiculo
+
+# Subconjunto personalizado (ej. estimar el precio sin `precio_lista`)
+custom:
+  - marca
+  - tipo_vehiculo
+  - año_modelo
+  - kilometraje
+```
+- ALL: utiliza todas las variables disponibles (numéricas y categóricas).
+
+- NUMERIC: excluye las variables categóricas y entrena únicamente con las numéricas.
+
+- CUSTOM: utiliza estrictamente la lista definida bajo la clave custom (nombres exactos del CSV).
 
 ### Demostración del criterio de éxito
 
