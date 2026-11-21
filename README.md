@@ -14,19 +14,24 @@ Repositorio del equipo para la asignatura de MLOps (Maestría en Ciencia de Dato
 
 ```text
 PROYECTO_DE_EQUIPO/
+├── .github/workflows/ci.yml   # CI: ejecuta los tests en cada pull request (actividad 3)
 ├── api/
 │   └── main.py                # API de FastAPI que sirve el modelo champion (actividad 2)
 ├── configs/
-│   ├── config.yaml            # datos, modelo, reglas del champion, inferencia y despliegue
+│   ├── config.yaml            # datos, modelo, champion, inferencia (nivel de drift), monitoreo y despliegue
 │   └── features.yaml          # selección de variables del experimento: ALL, NUMERIC o CUSTOM
 ├── data/
 │   ├── car_sales_dataset.csv  # dataset sintético (20.000 filas, semilla 42)
-│   └── predicciones/          # prediccion_<fecha>.csv de la inferencia diaria (no se versiona)
+│   ├── lotes/                 # copia de cada lote puntuado, con drift emulado (no se versiona)
+│   └── predicciones/          # prediccion_<fecha>.csv de la inferencia (no se versiona)
 ├── flows/                     # flows de Prefect
 │   ├── prueba_flow.py         # validación de servicios (actividad 1)
 │   ├── entrenamiento_flow.py  # ingesta → entrenamiento → evaluación → registro
-│   ├── inferencia_flow.py     # inferencia con el modelo champion
-│   └── desplegar.py           # despliegues en Prefect (inferencia diaria)
+│   ├── inferencia_flow.py     # lote de prueba + drift emulado → predicción → copia del lote
+│   ├── drift_features_flow.py # drift de las variables de entrada con Evidently (actividad 3)
+│   ├── drift_evento_flow.py   # drift del precio de venta con la prueba KS (actividad 3)
+│   └── desplegar.py           # despliegues en Prefect
+├── reports/                   # reportes de drift por lote (no se versionan)
 ├── services/                  # MLflow y Prefect con Docker Compose
 ├── src/                       # lógica del proyecto, sin Prefect ni MLflow
 │   ├── config.py              # lectura de los YAML
@@ -34,13 +39,10 @@ PROYECTO_DE_EQUIPO/
 │   ├── load_data.py           # carga y validación del dataset
 │   ├── features.py            # resuelve ALL / NUMERIC / CUSTOM
 │   ├── train.py               # pipeline de scikit-learn y métricas
-│   └── champion.py            # regla para decidir si un modelo pasa a champion
-├── tests/                     # pruebas con pytest
-│   ├── test_api.py            # pruebas de endpoints FastAPI (/health, /model-info, /predict)
-│   ├── test_champion.py       # pruebas de reglas de decisión de champion
-│   ├── test_datos.py          # pruebas de reproducibilidad y datos
-│   ├── test_features.py       # pruebas de alias ALL, NUMERIC y CUSTOM
-│   └── test_train.py          # pruebas del pipeline de entrenamiento
+│   ├── champion.py            # regla para decidir si un modelo pasa a champion
+│   └── drift.py               # emulación y detección de drift (actividad 3)
+├── tests/                     # pruebas con pytest (datos, modelo, inferencia, API y drift)
+├── pytest.ini
 ├── poetry.lock
 ├── pyproject.toml
 └── README.md
@@ -152,9 +154,9 @@ poetry run python flows/inferencia_flow.py
 
 El flow `inferencia-precio-vehiculos` hace cuatro cosas:
 1. Carga `models:/precio-vehiculos-modelo@champion`, por alias y nunca por número de versión.
-2. Toma 100 vehículos al azar como lote del día.
+2. Toma un lote de 500 vehículos de la **parte de prueba** y le aplica el drift emulado (ver la actividad 3).
 3. Predice su precio y guarda `data/predicciones/prediccion_<fecha>.csv`, con el precio predicho y el error frente al precio real.
-4. Registra un run `inferencia-<fecha>` con `fase = inferencia`, `modelo_version`, `filas_predichas`, `precio_medio_predicho` y `mae_lote`.
+4. Registra un run `inferencia-<fecha>-drift-<nivel>` con `fase = inferencia`, `modelo_version`, `nivel_drift`, `filas_predichas`, `precio_medio_predicho` y `mae_lote`.
 
 ### 3. Despliegues en Prefect
 
@@ -162,9 +164,10 @@ El flow `inferencia-precio-vehiculos` hace cuatro cosas:
 poetry run python flows/desplegar.py
 ```
 
-Deja esa terminal abierta. Quedan dos despliegues separados:
+Deja esa terminal abierta. Quedan cuatro despliegues separados:
 - `entrenamiento-precio-vehiculos/entrenamiento`: sin horario, se lanza a mano.
 - `inferencia-precio-vehiculos/inferencia-diaria`: todos los días a las **06:00, hora de Bogotá** (cron `0 6 * * *`).
+- `drift-features/drift-features-diario` y `drift-evento/drift-evento-diario`: todos los días a las **06:30**, sobre el lote que acaba de puntuar la inferencia (actividad 3).
 
 ### 4. API
 
@@ -209,37 +212,6 @@ Invoke-RestMethod -Uri http://localhost:8000/predict -Method Post -ContentType "
 
 La API recibe todos los datos del vehículo y usa solo las variables con las que se entrenó el champion. Si el entrenamiento promueve un champion nuevo, **reinicia la API** (Ctrl + C y vuelve a lanzarla) para que lo use. No hay que cambiar código.
 
-#### `configs/features.yaml`:
-
-Archivo de configuración para definir el conjunto de variables del experimento sin alterar el código fuente. En cada ejecución (*run*) se registran automáticamente en MLflow el alias seleccionado (`features`) y la cantidad de variables utilizadas (`n_features`).
-
-```yaml
-# Variables del experimento.
-# Opciones para `seleccion`: ALL | NUMERIC | CUSTOM
-seleccion: CUSTOM
-
-numericas:
-  - año_modelo
-  - kilometraje
-  - precio_lista
-
-categoricas:
-  - marca
-  - tipo_vehiculo
-
-# Subconjunto personalizado (ej. estimar el precio sin `precio_lista`)
-custom:
-  - marca
-  - tipo_vehiculo
-  - año_modelo
-  - kilometraje
-```
-- ALL: utiliza todas las variables disponibles (numéricas y categóricas).
-
-- NUMERIC: excluye las variables categóricas y entrena únicamente con las numéricas.
-
-- CUSTOM: utiliza estrictamente la lista definida bajo la clave custom (nombres exactos del CSV).
-
 ### Demostración del criterio de éxito
 
 Con la semilla 42, esta secuencia da siempre el mismo resultado:
@@ -254,6 +226,80 @@ Después del paso 2, al reiniciar la API, `/health` pasa de `"version": "1"` a `
 
 ---
 
+## Actividad 3: monitoreo, drift y CI
+
+### Drift emulado en la inferencia
+
+La inferencia toma cada lote de la **parte de prueba** del dataset, es decir, de vehículos que el modelo no vio al entrenar. Es la misma partición del entrenamiento: 20 % con semilla 42. Antes de predecir, al lote se le aplica un drift emulado. El nivel lo fija `inferencia.nivel_drift` en `configs/config.yaml`; no lo introduce quien ejecuta la pipeline.
+
+El nivel decide **cuántas** de las 5 variables de entrada cambian (`int(nivel × 5)`), siempre en este orden:
+
+| Orden | Variable | Cambio emulado | Qué representa |
+|---|---|---|---|
+| 1 | `kilometraje` | × 1,6 | Llegan vehículos más usados |
+| 2 | `año_modelo` | − 4 años | Llegan modelos más antiguos |
+| 3 | `tipo_vehiculo` | 50 % pasa a Pick-up | Cambia la mezcla de carrocerías |
+| 4 | `marca` | 50 % pasa a Ford | Cambia la mezcla de marcas |
+| 5 | `precio_lista` | × 1,3 | Suben los precios publicados |
+
+Además, la **variable objetivo** `precio_venta` se multiplica por `1 + nivel × 0,25`, como una inflación de los precios de cierre.
+
+| `nivel_drift` | Variables que cambian | Fracción | Precio de venta |
+|---|---|---|---|
+| 0.0 | ninguna | 0 % | sin cambio |
+| 0.3 | kilometraje | 20 % | +7,5 % |
+| 0.6 | kilometraje, año_modelo, tipo_vehiculo | 60 % | +15 % |
+
+Cada ejecución guarda el lote puntuado (con el precio real) en dos archivos. El primero es `data/lotes/lote_actual.csv`, que leen los pipelines de drift. El segundo es una copia con fecha y nivel, `data/lotes/lote_<fecha>_nivel_<nivel>.csv`.
+
+### Pipelines de detección de drift
+
+Se ejecutan después de la inferencia y comparan el lote con la parte de entrenamiento. La lógica no depende de MLflow; si `MLFLOW_TRACKING_URI` está definida, además registran un run con `fase = monitoreo`.
+
+```powershell
+poetry run python flows/drift_features_flow.py
+poetry run python flows/drift_evento_flow.py
+```
+
+| Pipeline | Qué compara | Cómo | Alerta | Reporte |
+|---|---|---|---|---|
+| `drift-features` | Las 5 variables de entrada | Evidently `DataDriftPreset`: Wasserstein (numéricas) y Jensen-Shannon (categóricas), umbral 0,1 por variable | Si la fracción de variables con drift supera `monitoreo.umbral_drift` (0,3) | `reports/drift_features_<lote>.html` |
+| `drift-evento` | El precio de venta (target) | Prueba de Kolmogorov-Smirnov de dos muestras | Si el p-valor es menor que `monitoreo.alfa_evento` (0,05) | `reports/drift_evento_<lote>.md` |
+
+La alerta es un log de nivel **WARNING** que empieza con `ALERTA:` y se ve en la consola y en los logs de Prefect. Los dos flows también dejan un artefacto de resumen en Prefect.
+
+**Por qué KS y no chi-cuadrado:** el ejemplo de referencia compara una tasa binaria (churn sí o no). Nuestro objetivo es un precio continuo, así que comparamos su distribución completa con la prueba de Kolmogorov-Smirnov.
+
+**Lotes sin etiquetas:** en producción el precio real llega con retraso. Si el lote no trae `precio_venta`, o le faltan valores, `drift-evento` se detiene con un mensaje claro y no calcula nada.
+
+Resultados con la semilla 42 (lote de 500 vehículos):
+
+| Nivel | Drift de features | Alerta features | Target (media, p-valor KS) | Alerta target | Error medio del lote |
+|---|---|---|---|---|---|
+| 0.0 | 0 % | No | −3,1 %, p = 0,097 | No | 412 USD |
+| 0.3 | 20 % | No | +4,2 %, p = 0,048 | Sí | 1.126 USD |
+| 0.6 | 60 % | **Sí** | +11,4 %, p < 0,0001 | Sí | 2.253 USD |
+
+### Tests y CI
+
+```powershell
+poetry run pytest
+```
+
+Son 62 tests que no necesitan MLflow ni Prefect levantados:
+
+| Archivo | Qué prueba |
+|---|---|
+| `tests/test_datos.py` | Esquema, tipos, rangos, categorías, nulos, duplicados y reproducibilidad del dataset |
+| `tests/test_features.py`, `tests/test_train.py`, `tests/test_champion.py` | Selección de variables, entrenamiento, métricas y regla del champion |
+| `tests/test_inferencia.py` | Que el lote salga solo de la parte de prueba, el nivel de drift, la copia del lote y la predicción (con un modelo falso) |
+| `tests/test_api.py` | `/health` y `/predict` con `TestClient` y un modelo falso (sin MLflow) |
+| `tests/test_drift.py` | Emulación, rechazo de lotes sin etiquetas, prueba KS, lectura de Evidently, alerta y el criterio de éxito (0.0 sin alerta, 0.6 con alerta) |
+
+El workflow `.github/workflows/ci.yml` ejecuta los mismos tests en GitHub Actions en cada pull request y en cada push a `main`.
+
+---
+
 ## Solución de problemas
 
 | Problema | Solución |
@@ -264,3 +310,6 @@ Después del paso 2, al reiniciar la API, `/health` pasa de `"version": "1"` a `
 | La API sigue respondiendo con la versión anterior | Reiníciala: carga el champion solo al arrancar. |
 | Los despliegues no se ejecutan | La terminal de `desplegar.py` debe seguir abierta. |
 | `Could not find the python executable 3.12` | Usa `poetry env use (py -3.14 -c "import sys; print(sys.executable)")`, cambiando 3.14 por tu versión. |
+| `No existe el lote data/lotes/lote_actual.csv` | Los pipelines de drift leen el lote de la inferencia: ejecuta primero `flows/inferencia_flow.py`. |
+| `El lote no tiene la columna 'precio_venta'` | Es el comportamiento esperado con lotes sin etiquetas: el drift del target necesita el precio real. |
+| Python 3.15 instalado | El proyecto admite de 3.12 a 3.14. Instala también la 3.14 (`winget install Python.Python.3.14`) y usa `py -3.14`. |
