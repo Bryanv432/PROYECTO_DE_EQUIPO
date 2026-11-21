@@ -224,3 +224,6 @@ mlflow.db
 mlflow_store/
 
 data/predicciones/
+
+data/lotes/
+reports/

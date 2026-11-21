@@ -51,9 +51,23 @@ registro:
   mae_maximo: 1000.0                       # criterio adicional del grupo: error medio máximo aceptado (USD)
 
 inferencia:
-  tamano_lote: 100                   # vehículos que se valoran en cada ejecución diaria
+  tamano_lote: 500                   # vehículos que se valoran en cada ejecución (de la parte de prueba)
+  semilla_lote: 42                   # fija la muestra del lote para poder comparar niveles de drift
   carpeta_salida: data/predicciones  # aquí queda prediccion_<fecha>.csv (no se versiona)
+  # Drift emulado (actividad 3). Lo fija este archivo, no quien ejecuta la pipeline.
+  #   0.0 -> sin drift | 0.3 -> 1 de 5 variables cambia | 0.6 -> 3 de 5 variables cambian
+  # Además, el precio de venta sube un (nivel × 25) %. Detalle en src/drift.py.
+  nivel_drift: 0.0
+
+# Monitoreo de drift (actividad 3)
+monitoreo:
+  carpeta_lotes: data/lotes          # copia de cada lote puntuado (no se versiona)
+  lote_actual: data/lotes/lote_actual.csv   # el último lote; lo leen los pipelines de drift
+  carpeta_reportes: reports          # reportes HTML de Evidently (no se versionan)
+  umbral_drift: 0.3                  # alerta si la fracción de variables con drift supera este valor
+  alfa_evento: 0.05                  # alerta de drift del target si el p-valor de la prueba KS es menor
 
 despliegue:
   cron_inferencia: "0 6 * * *"       # todos los días a las 06:00
+  cron_drift: "30 6 * * *"           # los pipelines de drift, media hora después de la inferencia
   zona_horaria: America/Bogota
